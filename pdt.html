@@ -2,8 +2,24 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>eruda.init();</script>
+<script>
+  // 에러를 가로채서 화면에 빨간 박스로 보여주는 장치
+  window.onerror = function(msg, url, line) {
+    var div = document.createElement('div');
+    div.style.position = 'fixed';
+    div.style.top = '0';
+    div.style.left = '0';
+    div.style.width = '100%';
+    div.style.backgroundColor = 'red';
+    div.style.color = 'white';
+    div.style.zIndex = '10000';
+    div.style.padding = '10px';
+    div.style.fontSize = '12px';
+    div.innerHTML = '에러 발생: ' + msg + ' <br>위치: ' + url + ':' + line;
+    document.body.appendChild(div);
+  };
+</script>
+
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Derkerk | Admin Pro</title>
 <style>
