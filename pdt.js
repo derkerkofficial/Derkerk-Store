@@ -1,4 +1,3 @@
-// 1. 대문자 Import를 소문자 import로 수정 (태블릿 에러 방지)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
@@ -15,6 +14,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// 상태 변수 (기존 기능 100% 유지)
 let products = [];
 let categories = [];
 let highlights = []; 
@@ -31,7 +31,8 @@ const sizeOptions = {
     custom: [] 
 };
 
-// --- 서버 데이터 로드 ---
+// --- [서버 연동] 로드/저장/삭제 ---
+
 async function loadProductsFromServer() {
     try {
         const querySnapshot = await getDocs(collection(db, "products"));
@@ -40,33 +41,12 @@ async function loadProductsFromServer() {
             products.push({ ...doc.data(), firebaseUrl: doc.id });
         });
         renderProducts();
+        renderFilters(); 
     } catch (e) {
         console.error("데이터 로드 실패:", e);
     }
 }
 
-// --- [중요] 중복 체크 및 저장 호출 수정 ---
-async function handleSaveWithDuplicateCheck() {
-    const nameInput = document.getElementById('productName');
-    const newName = nameInput.value.trim();
-    if (!newName) { alert("상품명을 입력해주세요."); return; }
-    
-    const isDuplicate = products.some(p => {
-        if (editingId !== null && p.firebaseUrl === editingId) return false; 
-        return p.name === newName;
-    });
-    
-    if (isDuplicate) { 
-        alert("이미 존재하는 상품명입니다."); 
-        nameInput.focus(); 
-        return; 
-    }
-    
-    // async 함수이므로 await로 호출
-    await saveProduct();
-}
-
-// --- 저장 로직 ---
 async function saveProduct() {
     const name = document.getElementById('productName').value.trim();
     const price = parseInt(document.getElementById('productPrice').value) || 0;
@@ -86,8 +66,7 @@ async function saveProduct() {
     
     try {
         if (editingId !== null) {
-            const productRef = doc(db, "products", editingId);
-            await updateDoc(productRef, productData);
+            await updateDoc(doc(db, "products", editingId), productData);
             alert("수정 완료!");
         } else {
             await addDoc(collection(db, "products"), productData);
@@ -100,7 +79,6 @@ async function saveProduct() {
     }
 }
 
-// --- 삭제 로직 ---
 async function deleteProduct(id) { 
     if(confirm("정말 서버에서 삭제하시겠습니까?")) {
         try {
@@ -113,7 +91,8 @@ async function deleteProduct(id) {
     }
 }
 
-// --- 나머지 기존 UI 기능 (유지) ---
+// --- [UI 렌더링] ---
+
 function renderProducts() {
     const list = document.getElementById('productList'); 
     if(!list) return;
@@ -132,8 +111,8 @@ function renderProducts() {
         });
         const salePrice = Math.floor((p.price || 0) * (1 - (p.discount || 0) / 100));
         list.innerHTML += `
-            <div class="product-item" style="cursor:pointer;">
-                <div onclick="editProduct('${p.firebaseUrl}')" style="flex:1;">
+            <div class="product-item">
+                <div onclick="editProduct('${p.firebaseUrl}')" style="flex:1; cursor:pointer;">
                     <div style="font-weight:bold;">${p.name} - ${salePrice.toLocaleString()}원</div>
                     <div style="color:#888; font-size:0.85rem;">${stockSum}</div>
                 </div>
@@ -168,41 +147,40 @@ function editProduct(id) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function checkNameInput() {
-    const nameVal = document.getElementById('productName').value.trim();
-    const dynamicArea = document.getElementById('dynamicDetails');
-    if (!dynamicArea) return;
-    if (nameVal.length > 0 || editingId !== null) {
-        dynamicArea.style.maxHeight = "2000px"; dynamicArea.style.opacity = "1";
-        dynamicArea.style.pointerEvents = "auto"; dynamicArea.style.marginTop = "20px";
-    } else {
-        dynamicArea.style.maxHeight = "0"; dynamicArea.style.opacity = "0";
-        dynamicArea.style.pointerEvents = "none"; dynamicArea.style.marginTop = "0";
-    }
+// --- [기능] 카테고리/색상/이미지 ---
+
+function addCategory(){
+    const val = document.getElementById('newCategoryInput').value.trim();
+    if(!val || categories.includes(val)) return;
+    categories.push(val); renderCategories(); renderFilters();
 }
 
-function limitValues(el) { if (el.value < 0) el.value = 0; if (el.id === 'discountRate' && el.value > 100) el.value = 100; }
-function calculateSalePrice() {
-    const price = parseInt(document.getElementById('productPrice').value) || 0;
-    const discount = parseInt(document.getElementById('discountRate').value) || 0;
-    const final = Math.floor(price * (1 - discount / 100));
-    document.getElementById('finalPriceDisplay').innerText = final.toLocaleString() + "원";
+function renderCategories(){
+    const list = document.getElementById('categoryList'), group = document.getElementById('categoryCheckboxGroup');
+    if(!list || !group) return;
+    list.innerHTML = ''; group.innerHTML = '';
+    categories.forEach((c,i)=>{
+        list.innerHTML += `<div class="item-wrapper"><span>${c}</span><button class="delete-x-btn" onclick="deleteCategory(${i})">✕</button></div>`;
+        group.innerHTML += `<label><input type="checkbox" name="prodCat" value="${c}"> ${c}</label>`;
+    });
 }
 
-function resetForm() {
-    editingId = null; colors = []; currentColor = null; currentDescImages = [];
-    document.getElementById('productName').value = ''; 
-    document.getElementById('productPrice').value = '';
-    document.getElementById('discountRate').value = ''; 
-    document.getElementById('productDesc').value = ''; 
-    document.getElementById('finalPriceDisplay').innerText = '0원';
-    document.getElementById('descImageList').innerHTML = '';
-    document.querySelectorAll('input[name="prodCat"]').forEach(cb => cb.checked = false);
-    document.querySelectorAll('input[name="prodHigh"]').forEach(cb => cb.checked = false);
-    document.getElementById('editSection').style.display = 'none';
-    document.getElementById('saveNameBtn').style.display = 'none';
-    document.getElementById('variantEditor').style.display = 'none';
-    renderColors(); checkNameInput(); 
+function deleteCategory(i){ categories.splice(i,1); renderCategories(); renderFilters(); renderProducts(); }
+
+function addHighlight() {
+    const val = document.getElementById('newHighlightInput').value.trim();
+    if(!val || highlights.includes(val)) return;
+    highlights.push(val); renderHighlights();
+}
+
+function renderHighlights() {
+    const list = document.getElementById('highlightList'), group = document.getElementById('highlightCheckboxGroup');
+    if(!list || !group) return;
+    list.innerHTML = ''; group.innerHTML = '';
+    highlights.forEach((h, i) => {
+        list.innerHTML += `<div class="item-wrapper"><span>${h}</span><button class="delete-x-btn" onclick="highlights.splice(${i},1); renderHighlights();">✕</button></div>`;
+        group.innerHTML += `<label><input type="checkbox" name="prodHigh" value="${h}"> ${h}</label>`;
+    });
 }
 
 function addColor() {
@@ -218,7 +196,7 @@ function renderColors() {
     list.innerHTML = '';
     colors.forEach((c) => {
         const active = currentColor === c.name ? 'active' : '';
-        list.innerHTML += `<div class="item-wrapper ${active}" draggable="true" data-name="${c.name}" onclick="selectColor('${c.name}')"><span>${c.name}</span><button class="delete-x-btn" onclick="event.stopPropagation(); deleteColor('${c.name}')">✕</button></div>`;
+        list.innerHTML += `<div class="item-wrapper ${active}" onclick="selectColor('${c.name}')"><span>${c.name}</span><button class="delete-x-btn" onclick="event.stopPropagation(); deleteColor('${c.name}')">✕</button></div>`;
     });
 }
 
@@ -263,7 +241,7 @@ function renderStockTable() {
     const colorData = colors.find(c => c.name === currentColor);
     if(!colorData) return;
     Object.keys(colorData.stock).forEach(size => {
-        tbody.innerHTML += `<tr><td>${size}</td><td><input type="number" class="stock-input" min="0" value="${colorData.stock[size]}" oninput="updateStock('${size}', this.value)" onfocus="this.select()"></td><td><button class="delete-x-btn" onclick="removeSizeItem('${size}')">✕</button></td></tr>`;
+        tbody.innerHTML += `<tr><td>${size}</td><td><input type="number" class="stock-input" value="${colorData.stock[size]}" oninput="updateStock('${size}', this.value)"></td><td><button class="delete-x-btn" onclick="removeSizeItem('${size}')">✕</button></td></tr>`;
     });
 }
 
@@ -309,48 +287,6 @@ function deleteImage(idx) {
     colorData.images.splice(idx,1); renderImages();
 }
 
-function addCategory(){
-    const val = document.getElementById('newCategoryInput').value.trim();
-    if(!val || categories.includes(val)) return;
-    categories.push(val); renderCategories(); renderFilters();
-}
-
-function renderCategories(){
-    const list = document.getElementById('categoryList'), group = document.getElementById('categoryCheckboxGroup');
-    if(!list || !group) return;
-    list.innerHTML = ''; group.innerHTML = '';
-    categories.forEach((c,i)=>{
-        list.innerHTML += `<div class="item-wrapper"><span>${c}</span><button class="delete-x-btn" onclick="deleteCategory(${i})">✕</button></div>`;
-        group.innerHTML += `<label><input type="checkbox" name="prodCat" value="${c}"> ${c}</label>`;
-    });
-}
-
-function deleteCategory(i){ categories.splice(i,1); renderCategories(); renderFilters(); renderProducts(); }
-
-function addHighlight() {
-    const val = document.getElementById('newHighlightInput').value.trim();
-    if(!val || highlights.includes(val)) return;
-    highlights.push(val); renderHighlights();
-}
-
-function renderHighlights() {
-    const list = document.getElementById('highlightList'), group = document.getElementById('highlightCheckboxGroup');
-    if(!list || !group) return;
-    list.innerHTML = ''; group.innerHTML = '';
-    highlights.forEach((h, i) => {
-        list.innerHTML += `<div class="item-wrapper"><span>${h}</span><button class="delete-x-btn" onclick="highlights.splice(${i},1); renderHighlights();">✕</button></div>`;
-        group.innerHTML += `<label><input type="checkbox" name="prodHigh" value="${h}"> ${h}</label>`;
-    });
-}
-
-function renderFilters() {
-    const area = document.getElementById('filterArea'); if(!area) return;
-    area.innerHTML = `<button class="filter-btn ${currentFilter === 'All' ? 'active' : ''}" onclick="setFilter('All')">All</button>`;
-    categories.forEach(c => area.innerHTML += `<button class="filter-btn ${currentFilter === c ? 'active' : ''}" onclick="setFilter('${c}')">${c}</button>`);
-}
-
-function setFilter(cat) { currentFilter = cat; renderFilters(); renderProducts(); }
-
 function uploadDescImages(e) {
     Array.from(e.target.files).forEach(file => {
         const reader = new FileReader();
@@ -367,19 +303,58 @@ function renderDescImageList() {
     });
 }
 
-// 초기화 실행
-window.onload = () => { 
-    renderFilters(); renderCategories(); renderHighlights(); 
-    loadProductsFromServer(); 
-};
+// --- [보조 기능] 가격/필터/리셋 ---
 
-// 태블릿 호환성을 위해 window 객체에 모두 명시적 등록
-window.saveProduct = saveProduct;
-window.handleSaveWithDuplicateCheck = handleSaveWithDuplicateCheck;
-window.deleteProduct = deleteProduct;
+function checkNameInput() {
+    const nameVal = document.getElementById('productName').value.trim();
+    const dynamicArea = document.getElementById('dynamicDetails');
+    if (nameVal.length > 0 || editingId !== null) {
+        dynamicArea.style.maxHeight = "2000px"; dynamicArea.style.opacity = "1";
+        dynamicArea.style.pointerEvents = "auto";
+    } else {
+        dynamicArea.style.maxHeight = "0"; dynamicArea.style.opacity = "0";
+    }
+}
+
+function calculateSalePrice() {
+    const price = parseInt(document.getElementById('productPrice').value) || 0;
+    const discount = parseInt(document.getElementById('discountRate').value) || 0;
+    const final = Math.floor(price * (1 - discount / 100));
+    document.getElementById('finalPriceDisplay').innerText = final.toLocaleString() + "원";
+}
+
+function renderFilters() {
+    const area = document.getElementById('filterArea'); if(!area) return;
+    area.innerHTML = `<button class="filter-btn ${currentFilter === 'All' ? 'active' : ''}" onclick="setFilter('All')">All</button>`;
+    categories.forEach(c => area.innerHTML += `<button class="filter-btn ${currentFilter === c ? 'active' : ''}" onclick="setFilter('${c}')">${c}</button>`);
+}
+
+function setFilter(cat) { currentFilter = cat; renderFilters(); renderProducts(); }
+
+function resetForm() {
+    editingId = null; colors = []; currentDescImages = [];
+    document.getElementById('productName').value = '';
+    document.getElementById('productPrice').value = '';
+    document.getElementById('discountRate').value = '';
+    document.getElementById('productDesc').value = '';
+    document.getElementById('finalPriceDisplay').innerText = '0원';
+    document.getElementById('descImageList').innerHTML = '';
+    document.querySelectorAll('input[name="prodCat"]').forEach(cb => cb.checked = false);
+    document.getElementById('editSection').style.display = 'none';
+    document.getElementById('saveNameBtn').style.display = 'none';
+    checkNameInput();
+}
+
+// --- [최중요] 태블릿/HTML 연동 (window 등록) ---
+
+window.handleSaveWithDuplicateCheck = async () => {
+    if (!document.getElementById('productName').value.trim()) { alert("상품명을 입력하세요."); return; }
+    await saveProduct();
+};
 window.editProduct = editProduct;
-window.setFilter = setFilter;
+window.deleteProduct = deleteProduct;
 window.addCategory = addCategory;
+window.deleteCategory = deleteCategory;
 window.addHighlight = addHighlight;
 window.addColor = addColor;
 window.selectColor = selectColor;
@@ -391,6 +366,9 @@ window.deleteImage = deleteImage;
 window.uploadDescImages = uploadDescImages;
 window.removeSizeItem = removeSizeItem;
 window.updateStock = updateStock;
+window.setFilter = setFilter;
 window.checkNameInput = checkNameInput;
-window.limitValues = limitValues;
 window.calculateSalePrice = calculateSalePrice;
+window.limitValues = (el) => { if (el.value < 0) el.value = 0; };
+
+window.onload = () => { loadProductsFromServer(); };
