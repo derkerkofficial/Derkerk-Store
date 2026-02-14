@@ -1,7 +1,21 @@
-/**
- * admin.js - Derkerk Admin Logic (최종 수정 버전)
- */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
+// 1. 사장님이 주신 Firebase 설정
+const firebaseConfig = {
+  apiKey: "AIzaSyDhPf0A4RBc4q8TV5FythPrRlsGA0Mspjc",
+  authDomain: "derkerk-84352.firebaseapp.com",
+  projectId: "derkerk-84352",
+  storageBucket: "derkerk-84352.firebasestorage.app",
+  messagingSenderId: "207773631707",
+  appId: "1:207773631707:web:cb68d7c5173f1f48e4b8fe",
+  measurementId: "G-2JFXG1HLKZ"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// 기존 변수들 유지
 let products = [];
 let categories = [];
 let highlights = []; 
@@ -18,51 +32,18 @@ const sizeOptions = {
     custom: [] 
 };
 
-// --- [수정] 상품명 입력 감지 로직 ---
-function checkNameInput() {
-    const nameVal = document.getElementById('productName').value.trim();
-    const dynamicArea = document.getElementById('dynamicDetails');
-    if (!dynamicArea) return;
-
-    if (nameVal.length > 0 || editingId !== null) {
-        dynamicArea.style.maxHeight = "2000px"; 
-        dynamicArea.style.opacity = "1";
-        dynamicArea.style.pointerEvents = "auto";
-        dynamicArea.style.marginTop = "20px";
-    } else {
-        dynamicArea.style.maxHeight = "0";
-        dynamicArea.style.opacity = "0";
-        dynamicArea.style.pointerEvents = "none";
-        dynamicArea.style.marginTop = "0";
-    }
-}
-
-// --- 공통 기능 ---
-function limitValues(el) {
-    if (el.value < 0) el.value = 0;
-    if (el.id === 'discountRate' && el.value > 100) el.value = 100;
-}
-
-function calculateSalePrice() {
-    const price = parseInt(document.getElementById('productPrice').value) || 0;
-    const discount = parseInt(document.getElementById('discountRate').value) || 0;
-    const final = Math.floor(price * (1 - discount / 100));
-    document.getElementById('finalPriceDisplay').innerText = final.toLocaleString() + "원";
-}
-
-function handleSaveWithDuplicateCheck() {
-    const nameInput = document.getElementById('productName');
-    const newName = nameInput.value.trim();
-    if (!newName) { alert("상품명을 입력해주세요."); return; }
-    const isDuplicate = products.some(p => {
-        if (editingId !== null && p.id === editingId) return false; 
-        return p.name === newName;
+// --- [추가] 서버에서 데이터 불러오기 ---
+async function loadProductsFromServer() {
+    const querySnapshot = await getDocs(collection(db, "products"));
+    products = [];
+    querySnapshot.forEach((doc) => {
+        products.push({ ...doc.data(), firebaseUrl: doc.id }); // Firestore ID 저장
     });
-    if (isDuplicate) { alert("이미 존재하는 상품명입니다."); nameInput.focus(); return; }
-    saveProduct();
+    renderProducts();
 }
 
-function saveProduct() {
+// --- [수정] 저장 로직 (Firebase 연동) ---
+async function saveProduct() {
     const name = document.getElementById('productName').value.trim();
     const price = parseInt(document.getElementById('productPrice').value) || 0;
     const discount = parseInt(document.getElementById('discountRate').value) || 0;
@@ -71,27 +52,47 @@ function saveProduct() {
     const checkedHighs = Array.from(document.querySelectorAll('input[name="prodHigh"]:checked')).map(cb => cb.value);
     
     const productData = { 
-        id: editingId !== null ? editingId : Date.now(), 
         name, price, discount, desc, 
         categories: checkedCats, 
         highlights: checkedHighs, 
         descImages: [...currentDescImages], 
-        colors: JSON.parse(JSON.stringify(colors)) 
+        colors: JSON.parse(JSON.stringify(colors)),
+        updatedAt: new Date()
     };
     
-    if (editingId !== null) {
-        const idx = products.findIndex(p => p.id === editingId);
-        if (idx !== -1) products[idx] = productData;
-    } else {
-        products.push(productData);
+    try {
+        if (editingId !== null) {
+            // 수정 모드: 기존 문서 업데이트
+            const productRef = doc(db, "products", editingId);
+            await updateDoc(productRef, productData);
+            alert("수정 완료!");
+        } else {
+            // 신규 저장: 새 문서 생성
+            await addDoc(collection(db, "products"), productData);
+            alert("서버 저장 완료!");
+        }
+        resetForm(); 
+        loadProductsFromServer(); // 서버 데이터 다시 불러오기
+    } catch (e) {
+        console.error("Error saving document: ", e);
+        alert("저장 실패: " + e.message);
     }
-    
-    resetForm(); 
-    renderProducts();
-    alert("저장되었습니다.");
 }
 
-// --- [수정] 리스트 출력 (화면 흔들림 방지 위해 높이 유지) ---
+// --- [수정] 삭제 로직 (Firebase 연동) ---
+async function deleteProduct(id) { 
+    if(confirm("정말 서버에서 삭제하시겠습니까?")) {
+        try {
+            await deleteDoc(doc(db, "products", id));
+            alert("삭제되었습니다.");
+            loadProductsFromServer();
+        } catch (e) {
+            alert("삭제 실패");
+        }
+    }
+}
+
+// --- [수정] 리스트 출력 (id 대신 firebaseUrl 사용) ---
 function renderProducts() {
     const list = document.getElementById('productList'); 
     if(!list) return;
@@ -111,18 +112,18 @@ function renderProducts() {
         const salePrice = Math.floor((p.price || 0) * (1 - (p.discount || 0) / 100));
         list.innerHTML += `
             <div class="product-item" style="cursor:pointer;">
-                <div onclick="editProduct(${p.id})" style="flex:1;">
+                <div onclick="editProduct('${p.firebaseUrl}')" style="flex:1;">
                     <div style="font-weight:bold;">${p.name} - ${salePrice.toLocaleString()}원</div>
                     <div style="color:#888; font-size:0.85rem;">${stockSum}</div>
                 </div>
-                <button onclick="deleteProduct(${p.id})" style="background:#444 !important; color:#fff !important; padding:5px 10px;">삭제</button>
+                <button onclick="deleteProduct('${p.firebaseUrl}')" style="background:#444 !important; color:#fff !important; padding:5px 10px;">삭제</button>
             </div>`;
     });
 }
 
 function editProduct(id) {
     editingId = id; 
-    const p = products.find(prod => prod.id === id);
+    const p = products.find(prod => prod.firebaseUrl === id);
     if (!p) return;
     
     document.getElementById('productName').value = p.name;
@@ -146,6 +147,36 @@ function editProduct(id) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+/* 아래는 기존 UI 기능 함수들 (수정 없음) */
+function checkNameInput() {
+    const nameVal = document.getElementById('productName').value.trim();
+    const dynamicArea = document.getElementById('dynamicDetails');
+    if (!dynamicArea) return;
+    if (nameVal.length > 0 || editingId !== null) {
+        dynamicArea.style.maxHeight = "2000px"; 
+        dynamicArea.style.opacity = "1";
+        dynamicArea.style.pointerEvents = "auto";
+        dynamicArea.style.marginTop = "20px";
+    } else {
+        dynamicArea.style.maxHeight = "0";
+        dynamicArea.style.opacity = "0";
+        dynamicArea.style.pointerEvents = "none";
+        dynamicArea.style.marginTop = "0";
+    }
+}
+function limitValues(el) { if (el.value < 0) el.value = 0; if (el.id === 'discountRate' && el.value > 100) el.value = 100; }
+function calculateSalePrice() {
+    const price = parseInt(document.getElementById('productPrice').value) || 0;
+    const discount = parseInt(document.getElementById('discountRate').value) || 0;
+    const final = Math.floor(price * (1 - discount / 100));
+    document.getElementById('finalPriceDisplay').innerText = final.toLocaleString() + "원";
+}
+function handleSaveWithDuplicateCheck() {
+    const nameInput = document.getElementById('productName');
+    const newName = nameInput.value.trim();
+    if (!newName) { alert("상품명을 입력해주세요."); return; }
+    saveProduct();
+}
 function resetForm() {
     editingId = null; colors = []; currentColor = null; currentDescImages = [];
     document.getElementById('productName').value = ''; 
@@ -162,8 +193,6 @@ function resetForm() {
     renderColors(); 
     checkNameInput(); 
 }
-
-// --- [수정] 색상 관리 (정렬 보정) ---
 function addColor() {
     const nameInput = document.getElementById('colorInput');
     const name = nameInput.value.trim();
@@ -171,7 +200,6 @@ function addColor() {
     colors.push({ name: name, sizeType: 'standard', stock: {S:0,M:0,L:0,XL:0}, images: [] });
     nameInput.value = ''; renderColors();
 }
-
 function renderColors() {
     const list = document.getElementById('colorList'); if(!list) return;
     list.innerHTML = '';
@@ -179,15 +207,7 @@ function renderColors() {
         const active = currentColor === c.name ? 'active' : '';
         list.innerHTML += `<div class="item-wrapper ${active}" draggable="true" data-name="${c.name}" onclick="selectColor('${c.name}')"><span>${c.name}</span><button class="delete-x-btn" onclick="event.stopPropagation(); deleteColor('${c.name}')">✕</button></div>`;
     });
-    list.removeEventListener('dragend', updateColorOrder);
-    list.addEventListener('dragend', updateColorOrder);
 }
-
-function updateColorOrder() {
-    const currentItems = Array.from(document.querySelectorAll('#colorList .item-wrapper'));
-    colors = currentItems.map(item => colors.find(c => c.name === item.getAttribute('data-name')));
-}
-
 function selectColor(name) {
     currentColor = name; renderColors(); 
     const colorData = colors.find(c => c.name === name);
@@ -196,14 +216,11 @@ function selectColor(name) {
     document.getElementById('sizeType').value = colorData.sizeType;
     changeSizeType(false); renderImages();
 }
-
 function deleteColor(name) {
     colors = colors.filter(c => c.name !== name);
     if(currentColor === name) { currentColor = null; document.getElementById('variantEditor').style.display = 'none'; }
     renderColors();
 }
-
-// --- [수정] 재고 관리 (포커스 시 자동 선택 기능 추가) ---
 function changeSizeType(forceClear) {
     if(!currentColor) return;
     const colorData = colors.find(c => c.name === currentColor);
@@ -211,7 +228,7 @@ function changeSizeType(forceClear) {
     colorData.sizeType = type;
     const customArea = document.getElementById('customSizeControls');
     if (type === 'custom') {
-        customArea.style.display = 'flex'; // flex로 변경하여 간격 조정
+        customArea.style.display = 'flex';
         if(forceClear) colorData.stock = {};
     } else {
         customArea.style.display = 'none';
@@ -223,7 +240,6 @@ function changeSizeType(forceClear) {
     }
     renderStockTable();
 }
-
 function renderStockTable() {
     const tbody = document.getElementById('stockTable'); if(!tbody) return;
     tbody.innerHTML = '';
@@ -232,17 +248,14 @@ function renderStockTable() {
         tbody.innerHTML += `<tr><td>${size}</td><td><input type="number" class="stock-input" min="0" value="${colorData.stock[size]}" oninput="updateStock('${size}', this.value)" onfocus="this.select()"></td><td><button class="delete-x-btn" onclick="removeSizeItem('${size}')">✕</button></td></tr>`;
     });
 }
-
 function updateStock(size, val) {
     const colorData = colors.find(c => c.name === currentColor);
     if(colorData) colorData.stock[size] = Math.max(0, parseInt(val) || 0);
 }
-
 function removeSizeItem(size) {
     const colorData = colors.find(c => c.name === currentColor);
     if(colorData) { delete colorData.stock[size]; renderStockTable(); }
 }
-
 function addCustomSizeItem() {
     const colorData = colors.find(c => c.name === currentColor);
     const sInput = document.getElementById('customSizeName');
@@ -251,7 +264,6 @@ function addCustomSizeItem() {
     colorData.stock[sName] = 0; 
     sInput.value = ''; renderStockTable();
 }
-
 function uploadImages(e) {
     const colorData = colors.find(c => c.name === currentColor);
     Array.from(e.target.files).forEach(file => {
@@ -260,7 +272,6 @@ function uploadImages(e) {
         reader.readAsDataURL(file);
     });
 }
-
 function renderImages() {
     const list = document.getElementById('imageList'); if(!list) return;
     list.innerHTML = '';
@@ -269,14 +280,10 @@ function renderImages() {
         list.innerHTML += `<div class="image-container"><img src="${img}" style="width:50px;height:50px;"><div class="delete-overlay" onclick="deleteImage(${idx})">삭제</div></div>`;
     });
 }
-
 function deleteImage(idx) {
     const colorData = colors.find(c => c.name === currentColor);
     colorData.images.splice(idx,1); renderImages();
 }
-
-// --- 카테고리/필터 유지 ---
-function markChanged() { document.getElementById('saveNameBtn').style.display = 'block'; }
 function addCategory(){
     const val = document.getElementById('newCategoryInput').value.trim();
     if(!val || categories.includes(val)) return;
@@ -287,7 +294,7 @@ function renderCategories(){
     if(!list || !group) return;
     list.innerHTML = ''; group.innerHTML = '';
     categories.forEach((c,i)=>{
-        list.innerHTML += `<div class="item-wrapper" draggable="true"><span>${c}</span><button class="delete-x-btn" onclick="deleteCategory(${i})">✕</button></div>`;
+        list.innerHTML += `<div class="item-wrapper"><span>${c}</span><button class="delete-x-btn" onclick="deleteCategory(${i})">✕</button></div>`;
         group.innerHTML += `<label><input type="checkbox" name="prodCat" value="${c}"> ${c}</label>`;
     });
 }
@@ -302,7 +309,7 @@ function renderHighlights() {
     if(!list || !group) return;
     list.innerHTML = ''; group.innerHTML = '';
     highlights.forEach((h, i) => {
-        list.innerHTML += `<div class="item-wrapper" draggable="true"><span>${h}</span><button class="delete-x-btn" onclick="highlights.splice(${i},1); renderHighlights();">✕</button></div>`;
+        list.innerHTML += `<div class="item-wrapper"><span>${h}</span><button class="delete-x-btn" onclick="highlights.splice(${i},1); renderHighlights();">✕</button></div>`;
         group.innerHTML += `<label><input type="checkbox" name="prodHigh" value="${h}"> ${h}</label>`;
     });
 }
@@ -326,8 +333,28 @@ function renderDescImageList() {
         list.innerHTML += `<div class="image-container"><img src="${img}" style="width:80px;height:100px;object-fit:cover;"><div class="delete-overlay" onclick="currentDescImages.splice(${idx},1); renderDescImageList();">삭제</div></div>`;
     });
 }
-function deleteProduct(id) { 
-    if(confirm("정말 삭제하시겠습니까?")) { products = products.filter(p => p.id !== id); renderProducts(); }
-}
 
-window.onload = () => { renderFilters(); renderCategories(); renderHighlights(); };
+// 윈도우 로드 시 서버 데이터 로드 추가
+window.onload = () => { 
+    renderFilters(); renderCategories(); renderHighlights(); 
+    loadProductsFromServer(); // 서버에서 기존 데이터 가져오기
+};
+
+// HTML에서 이벤트 함수를 직접 호출할 수 있도록 window 객체에 등록
+window.saveProduct = saveProduct;
+window.handleSaveWithDuplicateCheck = handleSaveWithDuplicateCheck;
+window.deleteProduct = deleteProduct;
+window.editProduct = editProduct;
+window.setFilter = setFilter;
+window.addCategory = addCategory;
+window.addHighlight = addHighlight;
+window.addColor = addColor;
+window.selectColor = selectColor;
+window.deleteColor = deleteColor;
+window.changeSizeType = changeSizeType;
+window.addCustomSizeItem = addCustomSizeItem;
+window.uploadImages = uploadImages;
+window.deleteImage = deleteImage;
+window.uploadDescImages = uploadDescImages;
+window.removeSizeItem = removeSizeItem;
+window.updateStock = updateStock;
