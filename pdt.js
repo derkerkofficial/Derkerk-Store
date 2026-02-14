@@ -1,7 +1,7 @@
+// 1. 대문자 Import를 소문자 import로 수정 (태블릿 에러 방지)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-// 1. 사장님이 주신 Firebase 설정
 const firebaseConfig = {
   apiKey: "AIzaSyDhPf0A4RBc4q8TV5FythPrRlsGA0Mspjc",
   authDomain: "derkerk-84352.firebaseapp.com",
@@ -15,7 +15,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// 기존 변수들 유지
 let products = [];
 let categories = [];
 let highlights = []; 
@@ -32,17 +31,42 @@ const sizeOptions = {
     custom: [] 
 };
 
-// --- [추가] 서버에서 데이터 불러오기 ---
+// --- 서버 데이터 로드 ---
 async function loadProductsFromServer() {
-    const querySnapshot = await getDocs(collection(db, "products"));
-    products = [];
-    querySnapshot.forEach((doc) => {
-        products.push({ ...doc.data(), firebaseUrl: doc.id }); // Firestore ID 저장
-    });
-    renderProducts();
+    try {
+        const querySnapshot = await getDocs(collection(db, "products"));
+        products = [];
+        querySnapshot.forEach((doc) => {
+            products.push({ ...doc.data(), firebaseUrl: doc.id });
+        });
+        renderProducts();
+    } catch (e) {
+        console.error("데이터 로드 실패:", e);
+    }
 }
 
-// --- [수정] 저장 로직 (Firebase 연동) ---
+// --- [중요] 중복 체크 및 저장 호출 수정 ---
+async function handleSaveWithDuplicateCheck() {
+    const nameInput = document.getElementById('productName');
+    const newName = nameInput.value.trim();
+    if (!newName) { alert("상품명을 입력해주세요."); return; }
+    
+    const isDuplicate = products.some(p => {
+        if (editingId !== null && p.firebaseUrl === editingId) return false; 
+        return p.name === newName;
+    });
+    
+    if (isDuplicate) { 
+        alert("이미 존재하는 상품명입니다."); 
+        nameInput.focus(); 
+        return; 
+    }
+    
+    // async 함수이므로 await로 호출
+    await saveProduct();
+}
+
+// --- 저장 로직 ---
 async function saveProduct() {
     const name = document.getElementById('productName').value.trim();
     const price = parseInt(document.getElementById('productPrice').value) || 0;
@@ -62,44 +86,41 @@ async function saveProduct() {
     
     try {
         if (editingId !== null) {
-            // 수정 모드: 기존 문서 업데이트
             const productRef = doc(db, "products", editingId);
             await updateDoc(productRef, productData);
             alert("수정 완료!");
         } else {
-            // 신규 저장: 새 문서 생성
             await addDoc(collection(db, "products"), productData);
             alert("서버 저장 완료!");
         }
         resetForm(); 
-        loadProductsFromServer(); // 서버 데이터 다시 불러오기
+        await loadProductsFromServer(); 
     } catch (e) {
-        console.error("Error saving document: ", e);
         alert("저장 실패: " + e.message);
     }
 }
 
-// --- [수정] 삭제 로직 (Firebase 연동) ---
+// --- 삭제 로직 ---
 async function deleteProduct(id) { 
     if(confirm("정말 서버에서 삭제하시겠습니까?")) {
         try {
             await deleteDoc(doc(db, "products", id));
             alert("삭제되었습니다.");
-            loadProductsFromServer();
+            await loadProductsFromServer();
         } catch (e) {
             alert("삭제 실패");
         }
     }
 }
 
-// --- [수정] 리스트 출력 (id 대신 firebaseUrl 사용) ---
+// --- 나머지 기존 UI 기능 (유지) ---
 function renderProducts() {
     const list = document.getElementById('productList'); 
     if(!list) return;
     list.innerHTML = '';
     const searchTerm = document.getElementById('productSearch').value.toLowerCase();
     const filtered = products.filter(p => {
-        const matchCategory = currentFilter === 'All' || p.categories.includes(currentFilter);
+        const matchCategory = currentFilter === 'All' || (p.categories && p.categories.includes(currentFilter));
         return matchCategory && p.name.toLowerCase().includes(searchTerm);
     });
 
@@ -140,30 +161,26 @@ function editProduct(id) {
     document.getElementById('saveNameBtn').style.display = 'block';
     
     renderColors(); 
-    document.querySelectorAll('input[name="prodCat"]').forEach(cb => cb.checked = p.categories.includes(cb.value));
+    document.querySelectorAll('input[name="prodCat"]').forEach(cb => cb.checked = (p.categories || []).includes(cb.value));
     document.querySelectorAll('input[name="prodHigh"]').forEach(cb => cb.checked = (p.highlights || []).includes(cb.value));
     
     checkNameInput(); 
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-/* 아래는 기존 UI 기능 함수들 (수정 없음) */
 function checkNameInput() {
     const nameVal = document.getElementById('productName').value.trim();
     const dynamicArea = document.getElementById('dynamicDetails');
     if (!dynamicArea) return;
     if (nameVal.length > 0 || editingId !== null) {
-        dynamicArea.style.maxHeight = "2000px"; 
-        dynamicArea.style.opacity = "1";
-        dynamicArea.style.pointerEvents = "auto";
-        dynamicArea.style.marginTop = "20px";
+        dynamicArea.style.maxHeight = "2000px"; dynamicArea.style.opacity = "1";
+        dynamicArea.style.pointerEvents = "auto"; dynamicArea.style.marginTop = "20px";
     } else {
-        dynamicArea.style.maxHeight = "0";
-        dynamicArea.style.opacity = "0";
-        dynamicArea.style.pointerEvents = "none";
-        dynamicArea.style.marginTop = "0";
+        dynamicArea.style.maxHeight = "0"; dynamicArea.style.opacity = "0";
+        dynamicArea.style.pointerEvents = "none"; dynamicArea.style.marginTop = "0";
     }
 }
+
 function limitValues(el) { if (el.value < 0) el.value = 0; if (el.id === 'discountRate' && el.value > 100) el.value = 100; }
 function calculateSalePrice() {
     const price = parseInt(document.getElementById('productPrice').value) || 0;
@@ -171,12 +188,7 @@ function calculateSalePrice() {
     const final = Math.floor(price * (1 - discount / 100));
     document.getElementById('finalPriceDisplay').innerText = final.toLocaleString() + "원";
 }
-function handleSaveWithDuplicateCheck() {
-    const nameInput = document.getElementById('productName');
-    const newName = nameInput.value.trim();
-    if (!newName) { alert("상품명을 입력해주세요."); return; }
-    saveProduct();
-}
+
 function resetForm() {
     editingId = null; colors = []; currentColor = null; currentDescImages = [];
     document.getElementById('productName').value = ''; 
@@ -190,9 +202,9 @@ function resetForm() {
     document.getElementById('editSection').style.display = 'none';
     document.getElementById('saveNameBtn').style.display = 'none';
     document.getElementById('variantEditor').style.display = 'none';
-    renderColors(); 
-    checkNameInput(); 
+    renderColors(); checkNameInput(); 
 }
+
 function addColor() {
     const nameInput = document.getElementById('colorInput');
     const name = nameInput.value.trim();
@@ -200,6 +212,7 @@ function addColor() {
     colors.push({ name: name, sizeType: 'standard', stock: {S:0,M:0,L:0,XL:0}, images: [] });
     nameInput.value = ''; renderColors();
 }
+
 function renderColors() {
     const list = document.getElementById('colorList'); if(!list) return;
     list.innerHTML = '';
@@ -208,6 +221,7 @@ function renderColors() {
         list.innerHTML += `<div class="item-wrapper ${active}" draggable="true" data-name="${c.name}" onclick="selectColor('${c.name}')"><span>${c.name}</span><button class="delete-x-btn" onclick="event.stopPropagation(); deleteColor('${c.name}')">✕</button></div>`;
     });
 }
+
 function selectColor(name) {
     currentColor = name; renderColors(); 
     const colorData = colors.find(c => c.name === name);
@@ -216,11 +230,13 @@ function selectColor(name) {
     document.getElementById('sizeType').value = colorData.sizeType;
     changeSizeType(false); renderImages();
 }
+
 function deleteColor(name) {
     colors = colors.filter(c => c.name !== name);
     if(currentColor === name) { currentColor = null; document.getElementById('variantEditor').style.display = 'none'; }
     renderColors();
 }
+
 function changeSizeType(forceClear) {
     if(!currentColor) return;
     const colorData = colors.find(c => c.name === currentColor);
@@ -240,30 +256,35 @@ function changeSizeType(forceClear) {
     }
     renderStockTable();
 }
+
 function renderStockTable() {
     const tbody = document.getElementById('stockTable'); if(!tbody) return;
     tbody.innerHTML = '';
     const colorData = colors.find(c => c.name === currentColor);
+    if(!colorData) return;
     Object.keys(colorData.stock).forEach(size => {
         tbody.innerHTML += `<tr><td>${size}</td><td><input type="number" class="stock-input" min="0" value="${colorData.stock[size]}" oninput="updateStock('${size}', this.value)" onfocus="this.select()"></td><td><button class="delete-x-btn" onclick="removeSizeItem('${size}')">✕</button></td></tr>`;
     });
 }
+
 function updateStock(size, val) {
     const colorData = colors.find(c => c.name === currentColor);
     if(colorData) colorData.stock[size] = Math.max(0, parseInt(val) || 0);
 }
+
 function removeSizeItem(size) {
     const colorData = colors.find(c => c.name === currentColor);
     if(colorData) { delete colorData.stock[size]; renderStockTable(); }
 }
+
 function addCustomSizeItem() {
     const colorData = colors.find(c => c.name === currentColor);
     const sInput = document.getElementById('customSizeName');
     const sName = sInput.value.trim();
     if(!sName || colorData.stock[sName] !== undefined) return;
-    colorData.stock[sName] = 0; 
-    sInput.value = ''; renderStockTable();
+    colorData.stock[sName] = 0; sInput.value = ''; renderStockTable();
 }
+
 function uploadImages(e) {
     const colorData = colors.find(c => c.name === currentColor);
     Array.from(e.target.files).forEach(file => {
@@ -272,23 +293,28 @@ function uploadImages(e) {
         reader.readAsDataURL(file);
     });
 }
+
 function renderImages() {
     const list = document.getElementById('imageList'); if(!list) return;
     list.innerHTML = '';
     const colorData = colors.find(c => c.name === currentColor);
+    if(!colorData) return;
     colorData.images.forEach((img, idx) => {
         list.innerHTML += `<div class="image-container"><img src="${img}" style="width:50px;height:50px;"><div class="delete-overlay" onclick="deleteImage(${idx})">삭제</div></div>`;
     });
 }
+
 function deleteImage(idx) {
     const colorData = colors.find(c => c.name === currentColor);
     colorData.images.splice(idx,1); renderImages();
 }
+
 function addCategory(){
     const val = document.getElementById('newCategoryInput').value.trim();
     if(!val || categories.includes(val)) return;
     categories.push(val); renderCategories(); renderFilters();
 }
+
 function renderCategories(){
     const list = document.getElementById('categoryList'), group = document.getElementById('categoryCheckboxGroup');
     if(!list || !group) return;
@@ -298,12 +324,15 @@ function renderCategories(){
         group.innerHTML += `<label><input type="checkbox" name="prodCat" value="${c}"> ${c}</label>`;
     });
 }
+
 function deleteCategory(i){ categories.splice(i,1); renderCategories(); renderFilters(); renderProducts(); }
+
 function addHighlight() {
     const val = document.getElementById('newHighlightInput').value.trim();
     if(!val || highlights.includes(val)) return;
     highlights.push(val); renderHighlights();
 }
+
 function renderHighlights() {
     const list = document.getElementById('highlightList'), group = document.getElementById('highlightCheckboxGroup');
     if(!list || !group) return;
@@ -313,12 +342,15 @@ function renderHighlights() {
         group.innerHTML += `<label><input type="checkbox" name="prodHigh" value="${h}"> ${h}</label>`;
     });
 }
+
 function renderFilters() {
     const area = document.getElementById('filterArea'); if(!area) return;
     area.innerHTML = `<button class="filter-btn ${currentFilter === 'All' ? 'active' : ''}" onclick="setFilter('All')">All</button>`;
     categories.forEach(c => area.innerHTML += `<button class="filter-btn ${currentFilter === c ? 'active' : ''}" onclick="setFilter('${c}')">${c}</button>`);
 }
+
 function setFilter(cat) { currentFilter = cat; renderFilters(); renderProducts(); }
+
 function uploadDescImages(e) {
     Array.from(e.target.files).forEach(file => {
         const reader = new FileReader();
@@ -326,6 +358,7 @@ function uploadDescImages(e) {
         reader.readAsDataURL(file);
     });
 }
+
 function renderDescImageList() {
     const list = document.getElementById('descImageList'); if(!list) return;
     list.innerHTML = '';
@@ -334,13 +367,13 @@ function renderDescImageList() {
     });
 }
 
-// 윈도우 로드 시 서버 데이터 로드 추가
+// 초기화 실행
 window.onload = () => { 
     renderFilters(); renderCategories(); renderHighlights(); 
-    loadProductsFromServer(); // 서버에서 기존 데이터 가져오기
+    loadProductsFromServer(); 
 };
 
-// HTML에서 이벤트 함수를 직접 호출할 수 있도록 window 객체에 등록
+// 태블릿 호환성을 위해 window 객체에 모두 명시적 등록
 window.saveProduct = saveProduct;
 window.handleSaveWithDuplicateCheck = handleSaveWithDuplicateCheck;
 window.deleteProduct = deleteProduct;
@@ -358,3 +391,6 @@ window.deleteImage = deleteImage;
 window.uploadDescImages = uploadDescImages;
 window.removeSizeItem = removeSizeItem;
 window.updateStock = updateStock;
+window.checkNameInput = checkNameInput;
+window.limitValues = limitValues;
+window.calculateSalePrice = calculateSalePrice;
